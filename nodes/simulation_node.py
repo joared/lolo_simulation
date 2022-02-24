@@ -55,8 +55,8 @@ class Simulator:
         #self.camHz = 10. # camera update rate
         #self.imageUpdateIndex = self.hz / self.camHz # image capture update index
 
-        self._velDockingStation = np.array([1.5, 0, 0, 0, 0, 0])
-        self._velAUV = np.array([1.5, 0, 0, 0, 0, 0])
+        self._velDockingStation = np.array([1., 0, 0, 0, 0, 0])
+        self._velAUV = np.array([1., 0, 0, 0, 0, 0])
         self._controlCommand = np.array([0., 0., 0.]) # [n, deltaR, deltaE]
 
         self.cameraInfoPublisher = rospy.Publisher("lolo_camera/camera_info", CameraInfo, queue_size=1)
@@ -84,8 +84,8 @@ class Simulator:
     def _resetCallback(self, req):
         self.auv.reset()
         self.dockingStation.reset()
-        self._velDockingStation = np.array([1.5, 0, 0, 0, 0, 0])
-        self._velAUV = np.array([1.5, 0, 0, 0, 0, 0])
+        self._velDockingStation = np.array([1., 0, 0, 0, 0, 0])
+        self._velAUV = np.array([1., 0, 0, 0, 0, 0])
         return TriggerResponse(
             success=True,
             message="Resetting simulation"
@@ -100,9 +100,8 @@ class Simulator:
     def _publish(self):
         timeStamp = rospy.Time.now()
 
-        """
         self.auvPosePublisher.publish(
-                                      vectorToPose("odom",
+                                      vectorToPose("ned",
                                       self.auv.translationVector, 
                                       self.auv.rotationVector, 
                                       np.zeros((6,6)),
@@ -110,13 +109,13 @@ class Simulator:
                                     )
 
         self.dockingStationPosePublisher.publish(
-                                                vectorToPose("odom",
+                                                vectorToPose("ned",
                                                              self.dockingStation.translationVector, 
                                                              self.dockingStation.rotationVector, 
                                                              np.zeros((6,6)),
                                                              timeStamp=timeStamp)
                                                 )
-        """
+        
         nedToOdom = vectorToTransform("odom",
                                       "ned",
                                       np.array([0, 0, 0]),
@@ -219,8 +218,10 @@ class Simulator:
         #self.auv.moveMotionModel(self._velAUV, dt)
         n, deltaR, deltaE = self._controlCommand
         self.dockingStation.controlIntegrate(n, deltaR, deltaE, dt)
+        #self.dockingStation.move(self._velDockingStation, dt)
 
         self.auv.controlIntegrate(200, 0, 0, dt)
+        #self.auv.move(self._velAUV, dt)
 
         if self.controlCamera:
             #Rotating the camera towards the detected feature model
@@ -247,10 +248,21 @@ class Simulator:
 
         i = 0
         while not rospy.is_shutdown():
+            controlImg = np.zeros((100,100,3), dtype=np.uint8)
+
+            org = (5, 30)
+            for symbol, v in zip(["n", "dR", "dE"], self._controlCommand):
+                cv.putText(controlImg, 
+                           "{} - {}".format(symbol, v), 
+                           org, 
+                           cv.FONT_HERSHEY_SIMPLEX, 
+                           fontScale=0.5, 
+                           thickness=1, 
+                           color=(0,255,0))
+                org = (org[0], org[1]+15)
+
+            cv.imshow("control", controlImg)
             
-            cv.imshow("control", np.zeros((10,10), dtype=np.uint8))
-            
-            w = 0.3
             key = cv.waitKey(1)
 
             w = 0.005

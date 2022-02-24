@@ -113,36 +113,14 @@ class Submarine:
         self.vel = newVel
         
     def move(self, vel, dt):
-        
-        v = np.matmul(R.from_rotvec(self.rotationVector).as_dcm(), np.array(vel[:3])*dt)
-
-        self.translationVector[0] += v[0]
-        self.translationVector[1] += v[1]
-        self.translationVector[2] += v[2]
-
-        w = np.array(vel[3:])*dt
-
-        #q = self.q
-        #qw = R.from_rotvec(w).as_quat()
-        #q = quaternion_multiply(q, qw)
-        #r = R.from_quat(q)
-        #self.q = q
-        #self.rotationVector = r.as_rotvec()
-
-        #rotMat = np.matmul(r.as_dcm(), rw.as_dcm())
-        #self.rotationVector = R.from_dcm(rotMat).as_rotvec()
-        r = R.from_rotvec(self.rotationVector)
-        rw = R.from_rotvec(w)
-        r = r*rw ### which one??
-        self.rotationVector = r.as_rotvec()
-
-        def skew(m):
-            return [[   0, -m[2],  m[1]], 
-                    [ m[2],    0, -m[0]], 
-                    [-m[1], m[0],     0]]
-
-        #r = R.from_matrix(np.matmul(skew(w), r.as_dcm()))
-        self.q = r.as_quat()
+        self.vel = vel
+        J1, J2 = self._motionModel()
+        deltaTrans = np.matmul(J1, self.vel[:3]*dt)
+        deltaAngle = np.matmul(J2, self.vel[3:]*dt)
+        deltaRotVec = R.from_euler("ZYX", [deltaAngle[2], deltaAngle[1], deltaAngle[0]]).as_rotvec()
+        self.translationVector += deltaTrans
+        self.rotationVector += deltaRotVec
+        self.q = R.from_rotvec(self.rotationVector).as_quat()
 
     def reset(self):
         self.translationVector = self.initTranslationVector.copy()
