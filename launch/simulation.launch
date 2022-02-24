@@ -1,0 +1,26 @@
+<launch>
+  <arg name="feature_model_yaml" default="big_prototype_5.yaml" />
+  <arg name="camera_yaml" default="usb_camera_720p_8.yaml" />
+
+  <node name="simulation" pkg="lolo_simulation" type="simulation_node.py" output="screen" >
+    <param name="feature_model_yaml" value="$(arg feature_model_yaml)"/>
+    <param name="camera_yaml" value="$(arg camera_yaml)"/>
+  </node>
+
+  <include file="$(find lolo_description)/launch/lolo_description.launch" />
+
+  <include file="$(find lolo_description)/launch/lolo_description.launch" >
+    <arg name="namespace" value="docking_station" />
+  </include>
+
+  <!--node name="perception_node" pkg="lolo_perception" type="perception_node.py" output="screen" >
+    <param name="feature_model_yaml" value="$(arg feature_model_yaml)"/>
+  </node-->
+
+  <node name="image_proc" pkg="image_proc" type="image_proc" ns="lolo_camera">
+    <remap from="image" to="/lolo_camera/image_raw"/>
+  </node>
+
+  <node type="rviz" name="rviz" pkg="rviz" args="-d $(find lolo_simulation)/rviz/simulation.rviz" />
+
+</launch>
