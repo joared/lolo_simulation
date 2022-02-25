@@ -8,7 +8,7 @@ import tf.msg
 from cv_bridge import CvBridge
 from sensor_msgs.msg import Image, CameraInfo
 from geometry_msgs.msg import PoseWithCovarianceStamped, PoseArray, TwistStamped
-
+from std_msgs.msg import Float32
 from std_srvs.srv import Trigger, TriggerResponse
 
 from lolo_perception.perception_utils import projectPoints
@@ -42,7 +42,7 @@ class Simulator:
                        relativeCameraRotation=R.from_euler("XYZ", (0, -np.pi/2, -np.pi/2)).as_rotvec(),
                        translationVector=np.array([10., -1., -1]),
                        rotationVector=np.array([0., 0., 0]))
-        self.dockingStation = DockingStation(translationVector=np.array([0., 0., -1]),
+        self.dockingStation = DockingStation(translationVector=np.array([0., 0., -2]),
                                              rotationVector=np.array([0., 0., 0]))
 
         # Move the camera towards the detected lights (yaw)
@@ -57,7 +57,7 @@ class Simulator:
 
         self._velDockingStation = np.array([1., 0, 0, 0, 0, 0])
         self._velAUV = np.array([1., 0, 0, 0, 0, 0])
-        self._controlCommand = np.array([0., 0., 0.]) # [n, deltaR, deltaE]
+        self._controlCommand = np.array([200., 0., 0.]) # [n, deltaR, deltaE]
 
         self.cameraInfoPublisher = rospy.Publisher("lolo_camera/camera_info", CameraInfo, queue_size=1)
 
@@ -77,7 +77,13 @@ class Simulator:
 
         self.listener = tf.TransformListener()
 
-        self.controlCallbackSubscriber = rospy.Subscriber("lolo/twist_command", TwistStamped, self._controlCallback)
+
+        self.rudderSub = rospy.Subscriber('core/rudder_cmd', Float32, self._rudderCallback)
+        self.elevatorSub = rospy.Subscriber('core/elevator_cmd', Float32, self._elevatorCallback)
+        #self.elevon_stbd_angle = rospy.Publisher('core/elevon_strb_cmd', Float32, queue_size=1)
+        #self.elevon_port_angle = rospy.Publisher('core/elevon_port_cmd', Float32, queue_size=1)
+        self.thrusterSub = rospy.Subscriber('core/thruster_cmd', Float32, self._thrusterCallback)
+        #self.controlCallbackSubscriber = rospy.Subscriber("lolo/twist_command", TwistStamped, self._controlCallback)
 
         self.resetService = rospy.Service("sim/reset", Trigger, self._resetCallback)
 
@@ -96,6 +102,15 @@ class Simulator:
 
     def _controlCallback(self, msg):
         self._velAUV = twistToVel(msg)
+
+    def _rudderCallback(self, msg):
+        self._controlCommand[1] = msg.data
+
+    def _elevatorCallback(self, msg):
+        self._controlCommand[2] = msg.data
+
+    def _thrusterCallback(self, msg):
+        self._controlCommand[0] = msg.data
 
     def _publish(self):
         timeStamp = rospy.Time.now()
@@ -217,10 +232,10 @@ class Simulator:
         #self.dockingStation.moveMotionModel(self._velDockingStation, dt)
         #self.auv.moveMotionModel(self._velAUV, dt)
         n, deltaR, deltaE = self._controlCommand
-        self.dockingStation.controlIntegrate(n, deltaR, deltaE, dt)
+        self.dockingStation.controlIntegrate(200, 0, 0, dt)
         #self.dockingStation.move(self._velDockingStation, dt)
 
-        self.auv.controlIntegrate(200, 0, 0, dt)
+        self.auv.controlIntegrate(n, deltaR, deltaE, dt)
         #self.auv.move(self._velAUV, dt)
 
         if self.controlCamera:
