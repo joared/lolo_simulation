@@ -1,20 +1,20 @@
 #!/usr/bin/env python
 import time
 import numpy as np
-
 import rospy
 import tf
 import tf.msg
 from cv_bridge import CvBridge
 from sensor_msgs.msg import Image, CameraInfo
 from geometry_msgs.msg import PoseWithCovarianceStamped, PoseArray, TwistStamped
+from nav_msgs.msg import Odometry
 from std_msgs.msg import Float32
 from std_srvs.srv import Trigger, TriggerResponse
 
 from lolo_perception.perception_utils import projectPoints
 from lolo_perception.perception_ros_utils import vectorToPose, vectorQuatToTransform, vectorToTransform, featurePointsToMsg, readCameraYaml
 from lolo_simulation.auv import AUV, DockingStation
-from lolo_control.control_utils import twistToVel
+from lolo_control.control_utils import twistToVel, stateToOdometry
 from scipy.spatial.transform import Rotation as R
 
 import cv2 as cv
@@ -40,10 +40,10 @@ class Simulator:
         """
         self.auv = AUV(relativeCameraTranslation=np.array([-2.5, 0, -0.33]),
                        relativeCameraRotation=R.from_euler("XYZ", (0, -np.pi/2, -np.pi/2)).as_rotvec(),
-                       translationVector=np.array([10., -1., -1]),
-                       rotationVector=np.array([0., 0., 0]))
-        self.dockingStation = DockingStation(translationVector=np.array([0., 0., -2]),
-                                             rotationVector=np.array([0., 0., 0]))
+                       translationVector=np.array([1., 0., -1]),
+                       rotationVector=np.array([0., 0., np.pi/2]))
+        self.dockingStation = DockingStation(translationVector=np.array([0., -10., -1.2]),
+                                             rotationVector=np.array([0., 0., np.pi/2]))
 
         # Move the camera towards the detected lights (yaw)
         self.controlCamera = False
@@ -55,9 +55,13 @@ class Simulator:
         #self.camHz = 10. # camera update rate
         #self.imageUpdateIndex = self.hz / self.camHz # image capture update index
 
-        self._velDockingStation = np.array([1., 0, 0, 0, 0, 0])
-        self._velAUV = np.array([1., 0, 0, 0, 0, 0])
-        self._controlCommand = np.array([200., 0., 0.]) # [n, deltaR, deltaE]
+        self._velDockingStation = np.array([0., 0, 0, 0, 0, 0])
+        self._velAUV = np.array([0., 0, 0, 0, 0, 0])
+
+        self._controlCommandDockingStationInit = np.array([400., 0., 0.]) # [n, deltaR, deltaE]
+        self._controlCommandAUVInit = np.array([400., 0., 0.])
+        self._controlCommandDockingStation = self._controlCommandDockingStationInit.copy()
+        self._controlCommandAUV = self._controlCommandAUVInit.copy()
 
         self.cameraInfoPublisher = rospy.Publisher("lolo_camera/camera_info", CameraInfo, queue_size=1)
 
@@ -71,13 +75,15 @@ class Simulator:
         self.auvFrame = "lolo"
         self.auvPosePublisher = rospy.Publisher(self.auvFrame + "/pose", PoseWithCovarianceStamped, queue_size=1)
 
+        self.auvCameraPosePublisher = rospy.Publisher(self.auvFrame + "/camera/pose", PoseWithCovarianceStamped, queue_size=1)
+
         self.dockingStationFrame = "docking_station"
         self.dockingStationPosePublisher = rospy.Publisher(self.dockingStationFrame + "/pose", PoseWithCovarianceStamped, queue_size=1)
         self.featurePosesPublisher = rospy.Publisher(self.dockingStationFrame + "/feature_model/poses", PoseArray, queue_size=1)
 
         self.listener = tf.TransformListener()
 
-
+        self.auvOdometryPub = rospy.Publisher("core/odometry", Odometry, queue_size=1)
         self.rudderSub = rospy.Subscriber('core/rudder_cmd', Float32, self._rudderCallback)
         self.elevatorSub = rospy.Subscriber('core/elevator_cmd', Float32, self._elevatorCallback)
         #self.elevon_stbd_angle = rospy.Publisher('core/elevon_strb_cmd', Float32, queue_size=1)
@@ -92,6 +98,8 @@ class Simulator:
         self.dockingStation.reset()
         self._velDockingStation = np.array([1., 0, 0, 0, 0, 0])
         self._velAUV = np.array([1., 0, 0, 0, 0, 0])
+        self._controlCommandDockingStation = self._controlCommandDockingStationInit.copy()
+        self._controlCommandAUV = self._controlCommandAUVInit.copy()
         return TriggerResponse(
             success=True,
             message="Resetting simulation"
@@ -104,13 +112,13 @@ class Simulator:
         self._velAUV = twistToVel(msg)
 
     def _rudderCallback(self, msg):
-        self._controlCommand[1] = msg.data
+        self._controlCommandAUV[1] = msg.data
 
     def _elevatorCallback(self, msg):
-        self._controlCommand[2] = msg.data
+        self._controlCommandAUV[2] = msg.data
 
     def _thrusterCallback(self, msg):
-        self._controlCommand[0] = msg.data
+        self._controlCommandAUV[0] = msg.data
 
     def _publish(self):
         timeStamp = rospy.Time.now()
@@ -122,6 +130,17 @@ class Simulator:
                                       np.zeros((6,6)),
                                       timeStamp=timeStamp)
                                     )
+
+        rAUV = R.from_rotvec(self.auv.rotationVector)
+        rCam = rAUV*R.from_rotvec(self.auv.relativeCameraRotation)
+        self.auvCameraPosePublisher.publish(
+                            vectorToPose("ned",
+                                         self.auv.translationVector + rAUV.apply(self.auv.relativeCameraTranslation),
+                                         rCam.as_rotvec(),
+                                         np.zeros((6,6)),
+                                         timeStamp=timeStamp,
+                                        )
+        )
 
         self.dockingStationPosePublisher.publish(
                                                 vectorToPose("ned",
@@ -177,6 +196,8 @@ class Simulator:
         pArray = featurePointsToMsg(self.dockingStationFrame + "/feature_model_link", self.featureModel.features, timeStamp=timeStamp)
         self.featurePosesPublisher.publish(pArray)
 
+        self._publishAUVOdometry(timeStamp)
+
         self.transformPublisher.publish(tf.msg.tfMessage([nedToOdom, 
                                                           dockingStationTransformNED,
                                                           dockingStationTransform, 
@@ -186,6 +207,14 @@ class Simulator:
                                                           cameraTransform]))
 
         self._publishImage(timeStamp)
+
+    def _publishAUVOdometry(self, timeStamp):
+        state = self.auv.state()
+        msg = stateToOdometry("ned", 
+                              self.auvFrame + "/base_link_ned", 
+                              state, 
+                              timeStamp=timeStamp)
+        self.auvOdometryPub.publish(msg)
 
     def _publishImage(self, timeStamp):
         try:
@@ -228,14 +257,68 @@ class Simulator:
         imgMsg.header.stamp = timeStamp
         self.imagePublisher.publish(imgMsg)
 
+    def plotControlInfo(self, controlImg):
+        cv.putText(controlImg, 
+                    "Mothership", 
+                    (5, 10), 
+                    cv.FONT_HERSHEY_SIMPLEX, 
+                    fontScale=0.5, 
+                    thickness=1, 
+                    color=(0,255,0))
+        cv.putText(controlImg, 
+                    "AUV", 
+                    (105, 10), 
+                    cv.FONT_HERSHEY_SIMPLEX, 
+                    fontScale=0.5, 
+                    thickness=1, 
+                    color=(0,255,0))
+        org = (5, 30)
+        for symbol, vDS, vAUV in zip(["n", "dR", "dE"], self._controlCommandDockingStation, self._controlCommandAUV):
+            cv.putText(controlImg, 
+                        "{} - {}".format(symbol, round(vDS, 2)), 
+                        org, 
+                        cv.FONT_HERSHEY_SIMPLEX, 
+                        fontScale=0.5, 
+                        thickness=1, 
+                        color=(0,255,0))
+
+            cv.putText(controlImg, 
+                        "{} - {}".format(symbol, round(vAUV, 2)), 
+                        (org[0]+100, org[1]), 
+                        cv.FONT_HERSHEY_SIMPLEX, 
+                        fontScale=0.5, 
+                        thickness=1, 
+                        color=(0,255,0))
+
+            org = (org[0], org[1]+15)
+
+        cv.putText(controlImg, 
+                   "Vx - {}".format(round(self.dockingStation.state()[6], 2)), 
+                   org, 
+                   cv.FONT_HERSHEY_SIMPLEX, 
+                   fontScale=0.5, 
+                   thickness=1, 
+                   color=(0,255,0))
+        cv.putText(controlImg, 
+                   "Vx - {}".format(round(self.auv.state()[6], 2)), 
+                   (org[0]+100, org[1]), 
+                   cv.FONT_HERSHEY_SIMPLEX, 
+                   fontScale=0.5, 
+                   thickness=1, 
+                   color=(0,255,0))
+
     def _update(self, controlCommand, i, dt):
         #self.dockingStation.moveMotionModel(self._velDockingStation, dt)
         #self.auv.moveMotionModel(self._velAUV, dt)
-        n, deltaR, deltaE = self._controlCommand
-        self.dockingStation.controlIntegrate(200, 0, 0, dt)
+        n, deltaR, deltaE = self._controlCommandDockingStation
+        #n, deltaR, deltaE = self._controlCommandAUV
+        self.dockingStation.controlIntegrate(n, deltaR, deltaE, dt)
         #self.dockingStation.move(self._velDockingStation, dt)
 
+        n, deltaR, deltaE = self._controlCommandAUV
+        #n, deltaR, deltaE = self._controlCommandDockingStation
         self.auv.controlIntegrate(n, deltaR, deltaE, dt)
+        #self.auv.move(self._velDockingStation, dt)
         #self.auv.move(self._velAUV, dt)
 
         if self.controlCamera:
@@ -263,52 +346,43 @@ class Simulator:
 
         i = 0
         while not rospy.is_shutdown():
-            controlImg = np.zeros((100,100,3), dtype=np.uint8)
+            controlImg = np.zeros((100,200,3), dtype=np.uint8)
 
-            org = (5, 30)
-            for symbol, v in zip(["n", "dR", "dE"], self._controlCommand):
-                cv.putText(controlImg, 
-                           "{} - {}".format(symbol, v), 
-                           org, 
-                           cv.FONT_HERSHEY_SIMPLEX, 
-                           fontScale=0.5, 
-                           thickness=1, 
-                           color=(0,255,0))
-                org = (org[0], org[1]+15)
+            self.plotControlInfo(controlImg)
 
             cv.imshow("control", controlImg)
             
             key = cv.waitKey(1)
 
-            w = 0.005
+            w = 0.05
             if key == ord("w"):
                 self._velDockingStation[0] += 0.1
-                self._velDockingStation = np.array([self._velDockingStation[0], 0, 0, 0, 0, 0])
-                self._controlCommand[0] += 10
+                self._controlCommandDockingStation[0] += 10
             elif key == ord("s"):
                 self._velDockingStation[0] -= 0.1
-                self._velDockingStation = np.array([self._velDockingStation[0], 0, 0, 0, 0, 0])
-                self._controlCommand[0] = 0
+                self._controlCommandDockingStation[0] = 0
             elif key == ord("a"):
-                self._velDockingStation[5] -= w
-                self._controlCommand[1] -= 0.02
+                self._velDockingStation[5] = -w
+                self._controlCommandDockingStation[1] -= 0.02
             elif key == ord("d"):
-                self._velDockingStation[5] += w
-                self._controlCommand[1] += 0.02
+                self._velDockingStation[5] = w
+                self._controlCommandDockingStation[1] += 0.02
             elif key == ord("i"):
-                self._velDockingStation[4] -= w
-                self._controlCommand[2] -= 0.02
+                self._velDockingStation[4] = -w
+                self._controlCommandDockingStation[2] -= 0.02
             elif key == ord("k"):
-                self._velDockingStation[4] += w
-                self._controlCommand[2] += 0.02   
+                self._velDockingStation[4] = w
+                self._controlCommandDockingStation[2] += 0.02   
             elif key == ord("j"):
-                self._velDockingStation[3] -= w
+                self._velDockingStation[3] = -w
             elif key == ord("l"):
-                self._velDockingStation[3] += w    
+                self._velDockingStation[3] = w    
             elif key == ord("p"):
                 self.pause = not self.pause
             elif key == ord("r"):
                 self._resetCallback(None)
+            else:
+                self._velDockingStation = np.array([self._velDockingStation[0], 0, 0, 0, 0, 0])
             if not self.pause:
                 self.update(i)
                 i += 1

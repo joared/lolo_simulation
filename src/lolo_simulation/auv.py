@@ -17,11 +17,13 @@ class Submarine:
 
         self.vel = np.array([0., 0., 0., 0., 0., 0.]) # [u, v, w, p, q, r]
 
-    def _velocityNED(self, vel):
-        velNED = vel.copy()
-        velNED[1] *= -1
-        velNED[2] *= -1
-        velNED[3] *= -1
+    def state(self):
+        state = np.array([0.]*12)
+        state[:3] = self.translationVector
+        az, ay, ax = R.from_rotvec(self.rotationVector).as_euler("ZYX")
+        state[3:6] = ax, ay, az
+        state[6:12] = self.vel.copy()
+        return state
 
     def _motionModel(self):
         yaw, pitch, roll = R.from_rotvec(self.rotationVector).as_euler("ZYX")
@@ -71,6 +73,7 @@ class Submarine:
         deltaMG = m*g-V*rho*g
         print("deltaMG", deltaMG)
         """
+        
         deltaMG = 0.0
 
         u, v, w, p, q, r = vel
@@ -96,7 +99,8 @@ class Submarine:
         J1, J2 = self._motionModel()
         deltaTrans = np.matmul(J1, self.vel[:3]*dt)
         deltaAngle = np.matmul(J2, self.vel[3:]*dt)
-        deltaRotVec = R.from_euler("ZYX", [deltaAngle[2], deltaAngle[1], deltaAngle[0]]).as_rotvec()
+        deltaRot = R.from_euler("ZYX", [deltaAngle[2], deltaAngle[1], deltaAngle[0]])
+        newRot = R.from_rotvec(self.rotationVector)*deltaRot
 
         # propagate velocity based on current velocity, using dynamic model
         F = lambda t, vel: self._dynamicModel(vel, n, deltaR, deltaE)
@@ -108,7 +112,7 @@ class Submarine:
         newVel = sol.y[:, -1]
         
         self.translationVector += deltaTrans
-        self.rotationVector += deltaRotVec
+        self.rotationVector = newRot.as_rotvec()
         self.q = R.from_rotvec(self.rotationVector).as_quat()
         self.vel = newVel
         
@@ -116,22 +120,25 @@ class Submarine:
         self.vel = vel
         J1, J2 = self._motionModel()
         deltaTrans = np.matmul(J1, self.vel[:3]*dt)
-        deltaAngle = np.matmul(J2, self.vel[3:]*dt)
-        deltaRotVec = R.from_euler("ZYX", [deltaAngle[2], deltaAngle[1], deltaAngle[0]]).as_rotvec()
         self.translationVector += deltaTrans
-        self.rotationVector += deltaRotVec
+
+        deltaAngle = np.matmul(J2, self.vel[3:]*dt)
+        deltaRot = R.from_euler("ZYX", [deltaAngle[2], deltaAngle[1], deltaAngle[0]])
+        newRot = R.from_rotvec(self.rotationVector)*deltaRot
+        self.rotationVector = newRot.as_rotvec()
         self.q = R.from_rotvec(self.rotationVector).as_quat()
 
     def reset(self):
         self.translationVector = self.initTranslationVector.copy()
         self.rotationVector = self.initRotationVector.copy()
+        self.vel *= 0
         self.q = R.from_rotvec(self.initRotationVector).as_quat()
 
 class AUV(Submarine):
     # https://stackoverflow.com/questions/11140163/plotting-a-3d-cube-a-sphere-and-a-vector-in-matplotlib
     def __init__(self,
                  relativeCameraTranslation=np.array([-3.0/2, 0, 0]),
-                 relativeCameraRotation=R.from_euler("XYZ", (-np.pi/2, -np.pi/2, 0)).as_dcm(), 
+                 relativeCameraRotation=R.from_euler("XYZ", (-np.pi/2, -np.pi/2, 0)).as_rotvec(), 
                  *args, 
                  **kwargs):
         Submarine.__init__(self, *args, **kwargs)
