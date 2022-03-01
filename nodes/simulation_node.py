@@ -9,6 +9,7 @@ from sensor_msgs.msg import Image, CameraInfo
 from geometry_msgs.msg import PoseWithCovarianceStamped, PoseArray, TwistStamped
 from nav_msgs.msg import Odometry
 from std_msgs.msg import Float32
+from smarc_msgs.msg import ThrusterRPM
 from std_srvs.srv import Trigger, TriggerResponse
 
 from lolo_perception.perception_utils import projectPoints
@@ -88,7 +89,7 @@ class Simulator:
         self.elevatorSub = rospy.Subscriber('core/elevator_cmd', Float32, self._elevatorCallback)
         #self.elevon_stbd_angle = rospy.Publisher('core/elevon_strb_cmd', Float32, queue_size=1)
         #self.elevon_port_angle = rospy.Publisher('core/elevon_port_cmd', Float32, queue_size=1)
-        self.thrusterSub = rospy.Subscriber('core/thruster_cmd', Float32, self._thrusterCallback)
+        self.thrusterSub = rospy.Subscriber('core/thruster_cmd', ThrusterRPM, self._thrusterCallback)
         #self.controlCallbackSubscriber = rospy.Subscriber("lolo/twist_command", TwistStamped, self._controlCallback)
 
         self.resetService = rospy.Service("sim/reset", Trigger, self._resetCallback)
@@ -118,7 +119,7 @@ class Simulator:
         self._controlCommandAUV[2] = msg.data
 
     def _thrusterCallback(self, msg):
-        self._controlCommandAUV[0] = msg.data
+        self._controlCommandAUV[0] = msg.rpm
 
     def _publish(self):
         timeStamp = rospy.Time.now()
