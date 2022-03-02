@@ -250,6 +250,7 @@ class Simulator:
         size = 70*np.exp(-dist/k)
         size = int(size)
         size = min(size, int(minDist/2))
+        size = max(size, 1)
         for p in imagePoints:
             p = int(round(p[0])), int(round(p[1]))
             
