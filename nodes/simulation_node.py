@@ -43,7 +43,7 @@ class Simulator:
                        relativeCameraRotation=R.from_euler("XYZ", (0, -np.pi/2, -np.pi/2)).as_rotvec(),
                        translationVector=np.array([1., 0., -1]),
                        rotationVector=np.array([0., 0., np.pi/2]))
-        self.dockingStation = DockingStation(translationVector=np.array([0., -10., -1.2]),
+        self.dockingStation = DockingStation(translationVector=np.array([0., -13., -1.2]),
                                              rotationVector=np.array([0., 0., np.pi/2]))
 
         # Move the camera towards the detected lights (yaw)
@@ -234,6 +234,13 @@ class Simulator:
         trueRot = R.from_quat(trueRot).as_rotvec()
         imagePoints = projectPoints(trueTrans, trueRot, self.camera, self.featureModel.features)
 
+        minDist = np.inf
+        for i, imgP in enumerate(imagePoints):
+            for imgPOther in imagePoints[i+1:]:
+                dist = np.linalg.norm([imgP[0]-imgPOther[0], imgP[1]-imgPOther[1]])
+                if dist < minDist:
+                    minDist = dist
+
         imgColor = np.zeros((self.camera.resolution[0], self.camera.resolution[1], 3), dtype=np.uint8)
         
         dist = np.linalg.norm(trueTrans)
@@ -242,6 +249,7 @@ class Simulator:
         I = 255*np.exp(-dist/(k+m))
         size = 70*np.exp(-dist/k)
         size = int(size)
+        size = min(size, int(minDist/2))
         for p in imagePoints:
             p = int(round(p[0])), int(round(p[1]))
             
