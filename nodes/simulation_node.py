@@ -41,9 +41,9 @@ class Simulator:
         """
         self.auv = AUV(relativeCameraTranslation=np.array([-2.5, 0, -0.33]),
                        relativeCameraRotation=R.from_euler("XYZ", (0, -np.pi/2, -np.pi/2)).as_rotvec(),
-                       translationVector=np.array([1., 0., -1]),
-                       rotationVector=np.array([0., 0., np.pi/2]))
-        self.dockingStation = DockingStation(translationVector=np.array([0., -13., -1.2]),
+                       translationVector=np.array([1, 0., -2]),
+                       rotationVector=np.array([0., 0., np.pi/2.2]))
+        self.dockingStation = DockingStation(translationVector=np.array([0., -12., -1.8]),
                                              rotationVector=np.array([0., 0., np.pi/2]))
 
         # Move the camera towards the detected lights (yaw)
@@ -56,8 +56,10 @@ class Simulator:
         #self.camHz = 10. # camera update rate
         #self.imageUpdateIndex = self.hz / self.camHz # image capture update index
 
-        self._velDockingStation = np.array([0., 0, 0, 0, 0, 0])
-        self._velAUV = np.array([0., 0, 0, 0, 0, 0])
+        self._velDockingStationInit = np.array([0., 0., 0., 0., 0., 0.])
+        self._velAUVInit = np.array([0., 0., 0., 0., 0., 0.])
+        self._velDockingStation = self._velDockingStationInit.copy()
+        self._velAUV = self._velAUVInit.copy()
 
         self._controlCommandDockingStationInit = np.array([400., 0., 0.]) # [n, deltaR, deltaE]
         self._controlCommandAUVInit = np.array([400., 0., 0.])
@@ -90,15 +92,20 @@ class Simulator:
         #self.elevon_stbd_angle = rospy.Publisher('core/elevon_strb_cmd', Float32, queue_size=1)
         #self.elevon_port_angle = rospy.Publisher('core/elevon_port_cmd', Float32, queue_size=1)
         self.thrusterSub = rospy.Subscriber('core/thruster_cmd', ThrusterRPM, self._thrusterCallback)
-        #self.controlCallbackSubscriber = rospy.Subscriber("lolo/twist_command", TwistStamped, self._controlCallback)
+
+        self._twistControlMsg = None
+        self.twistControlCallbackSubscriber = rospy.Subscriber("lolo/twist_command", TwistStamped, self._twistControlCallback)
 
         self.resetService = rospy.Service("sim/reset", Trigger, self._resetCallback)
+
+        self.velocityMode = True # False: control mode, True: velocity mode
+        self.auvToControl = self.dockingStation # start by manual control input to be sent to docking station 
 
     def _resetCallback(self, req):
         self.auv.reset()
         self.dockingStation.reset()
-        self._velDockingStation = np.array([1., 0, 0, 0, 0, 0])
-        self._velAUV = np.array([1., 0, 0, 0, 0, 0])
+        self._velDockingStation = self._velDockingStationInit.copy()
+        self._velAUV = self._velAUVInit.copy()
         self._controlCommandDockingStation = self._controlCommandDockingStationInit.copy()
         self._controlCommandAUV = self._controlCommandAUVInit.copy()
         return TriggerResponse(
@@ -109,8 +116,8 @@ class Simulator:
     def _camImageCallback(self, msg):
         self.camImgMsg = msg
 
-    def _controlCallback(self, msg):
-        self._velAUV = twistToVel(msg)
+    def _twistControlCallback(self, msg):
+        self._twistControlMsg = msg
 
     def _rudderCallback(self, msg):
         self._controlCommandAUV[1] = msg.data
@@ -268,21 +275,37 @@ class Simulator:
         self.imagePublisher.publish(imgMsg)
 
     def plotControlInfo(self, controlImg):
+
+        modeText = "Velocity" if self.velocityMode else "Control"
+        cv.putText(controlImg, 
+                   "Mode: {}".format(modeText), 
+                   (5, 10), 
+                   cv.FONT_HERSHEY_SIMPLEX, 
+                   fontScale=0.5, 
+                   thickness=1, 
+                   color=(0,255,0))
+
+        auvColor = (150, 150, 150)
+        dsColor = (0, 255, 0)
+        if self.auvToControl == self.auv:
+            auvColor = (0, 255, 0)
+            dsColor = (150, 150, 150)
+
         cv.putText(controlImg, 
                     "Mothership", 
-                    (5, 10), 
+                    (5, 40), 
                     cv.FONT_HERSHEY_SIMPLEX, 
                     fontScale=0.5, 
                     thickness=1, 
-                    color=(0,255,0))
+                    color=dsColor)
         cv.putText(controlImg, 
                     "AUV", 
-                    (105, 10), 
+                    (105, 40), 
                     cv.FONT_HERSHEY_SIMPLEX, 
                     fontScale=0.5, 
                     thickness=1, 
-                    color=(0,255,0))
-        org = (5, 30)
+                    color=auvColor)
+        org = (5, 60)
         for symbol, vDS, vAUV in zip(["n", "dR", "dE"], self._controlCommandDockingStation, self._controlCommandAUV):
             cv.putText(controlImg, 
                         "{} - {}".format(symbol, round(vDS, 2)), 
@@ -290,7 +313,7 @@ class Simulator:
                         cv.FONT_HERSHEY_SIMPLEX, 
                         fontScale=0.5, 
                         thickness=1, 
-                        color=(0,255,0))
+                        color=dsColor)
 
             cv.putText(controlImg, 
                         "{} - {}".format(symbol, round(vAUV, 2)), 
@@ -298,7 +321,7 @@ class Simulator:
                         cv.FONT_HERSHEY_SIMPLEX, 
                         fontScale=0.5, 
                         thickness=1, 
-                        color=(0,255,0))
+                        color=auvColor)
 
             org = (org[0], org[1]+15)
 
@@ -308,29 +331,33 @@ class Simulator:
                    cv.FONT_HERSHEY_SIMPLEX, 
                    fontScale=0.5, 
                    thickness=1, 
-                   color=(0,255,0))
+                   color=dsColor)
         cv.putText(controlImg, 
                    "Vx - {}".format(round(self.auv.state()[6], 2)), 
                    (org[0]+100, org[1]), 
                    cv.FONT_HERSHEY_SIMPLEX, 
                    fontScale=0.5, 
                    thickness=1, 
-                   color=(0,255,0))
+                   color=auvColor)
 
     def _update(self, controlCommand, i, dt):
-        #self.dockingStation.moveMotionModel(self._velDockingStation, dt)
-        #self.auv.moveMotionModel(self._velAUV, dt)
-        n, deltaR, deltaE = self._controlCommandDockingStation
-        #n, deltaR, deltaE = self._controlCommandAUV
-        self.dockingStation.controlIntegrate(n, deltaR, deltaE, dt)
-        #self.dockingStation.move(self._velDockingStation, dt)
 
-        n, deltaR, deltaE = self._controlCommandAUV
-        #n, deltaR, deltaE = self._controlCommandDockingStation
-        self.auv.controlIntegrate(n, deltaR, deltaE, dt)
-        #self.auv.move(self._velDockingStation, dt)
-        #self.auv.move(self._velAUV, dt)
+        if self.velocityMode:
+            self.dockingStation.move(self._velDockingStation, dt)
 
+            vel = self._velAUV.copy()
+            if self._twistControlMsg:
+                # TODO: This might be werid (adding vel), but useful when testing PBVS and IBVS
+                vel += twistToVel(self._twistControlMsg)
+                self._twistControlMsg = None
+            self.auv.move(vel, dt)
+        else:
+            n, deltaR, deltaE = self._controlCommandDockingStation
+            self.dockingStation.controlIntegrate(n, deltaR, deltaE, dt)
+
+            n, deltaR, deltaE = self._controlCommandAUV
+            self.auv.controlIntegrate(n, deltaR, deltaE, dt)
+        
         if self.controlCamera:
             #Rotating the camera towards the detected feature model
             try:
@@ -353,10 +380,9 @@ class Simulator:
 
     def run(self):
         rate = rospy.Rate(self.hz)
-
         i = 0
         while not rospy.is_shutdown():
-            controlImg = np.zeros((100,200,3), dtype=np.uint8)
+            controlImg = np.zeros((200,200,3), dtype=np.uint8)
 
             self.plotControlInfo(controlImg)
 
@@ -364,35 +390,49 @@ class Simulator:
             
             key = cv.waitKey(1)
 
+            if self.auvToControl == self.auv:
+                controlCommandArray = self._controlCommandAUV
+                velocityCommandArray = self._velAUV
+            else:
+                controlCommandArray = self._controlCommandDockingStation
+                velocityCommandArray = self._velDockingStation
+
             w = 0.05
             if key == ord("w"):
-                self._velDockingStation[0] += 0.1
-                self._controlCommandDockingStation[0] += 10
+                velocityCommandArray[0] += 0.1
+                controlCommandArray[0] += 10
             elif key == ord("s"):
-                self._velDockingStation[0] -= 0.1
-                self._controlCommandDockingStation[0] = 0
+                velocityCommandArray[0] -= 0.1
+                controlCommandArray[0] = 0
             elif key == ord("a"):
-                self._velDockingStation[5] = -w
-                self._controlCommandDockingStation[1] -= 0.02
+                velocityCommandArray[5] = -w
+                controlCommandArray[1] -= 0.02
             elif key == ord("d"):
-                self._velDockingStation[5] = w
-                self._controlCommandDockingStation[1] += 0.02
+                velocityCommandArray[5] = w
+                controlCommandArray[1] += 0.02
             elif key == ord("i"):
-                self._velDockingStation[4] = -w
-                self._controlCommandDockingStation[2] -= 0.02
+                velocityCommandArray[4] = -w
+                controlCommandArray[2] -= 0.02
             elif key == ord("k"):
-                self._velDockingStation[4] = w
-                self._controlCommandDockingStation[2] += 0.02   
+                velocityCommandArray[4] = w
+                controlCommandArray[2] += 0.02   
             elif key == ord("j"):
-                self._velDockingStation[3] = -w
+                velocityCommandArray[3] = -w
             elif key == ord("l"):
-                self._velDockingStation[3] = w    
+                velocityCommandArray[3] = w    
             elif key == ord("p"):
                 self.pause = not self.pause
             elif key == ord("r"):
                 self._resetCallback(None)
+            elif key == ord("m"):
+                self.velocityMode = not self.velocityMode
+            elif key == ord("z"):
+                if self.auvToControl == self.auv:
+                    self.auvToControl = self.dockingStation
+                else:
+                    self.auvToControl = self.auv
             else:
-                self._velDockingStation = np.array([self._velDockingStation[0], 0, 0, 0, 0, 0])
+                velocityCommandArray[1:] *= 0
             if not self.pause:
                 self.update(i)
                 i += 1

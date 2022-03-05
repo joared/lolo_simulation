@@ -117,12 +117,23 @@ class Submarine:
         self.vel = newVel
         
     def move(self, vel, dt):
-        self.vel = vel
+
+        """
+        # using rotvec [wx, wy, wz]
+        deltaTrans = R.from_rotvec(self.rotationVector).apply(vel[:3]*dt)
+        self.translationVector += deltaTrans
+        newRot = R.from_rotvec(self.rotationVector)*R.from_rotvec(vel[3:]*dt)
+        self.rotationVector = newRot.as_rotvec()
+        self.q = newRot.as_quat()
+        self.vel *= 0
+        """
+                
+        # using NED euler convention [wx, wy, wz]
         J1, J2 = self._motionModel()
-        deltaTrans = np.matmul(J1, self.vel[:3]*dt)
+        deltaTrans = np.matmul(J1, vel[:3]*dt)
         self.translationVector += deltaTrans
 
-        deltaAngle = np.matmul(J2, self.vel[3:]*dt)
+        deltaAngle = np.matmul(J2, vel[3:]*dt)
         deltaRot = R.from_euler("ZYX", [deltaAngle[2], deltaAngle[1], deltaAngle[0]])
         newRot = R.from_rotvec(self.rotationVector)*deltaRot
         self.rotationVector = newRot.as_rotvec()
