@@ -15,12 +15,12 @@ from std_srvs.srv import Trigger, TriggerResponse
 from lolo_perception.perception_utils import projectPoints
 from lolo_perception.perception_ros_utils import vectorToPose, vectorQuatToTransform, vectorToTransform, featurePointsToMsg, readCameraYaml
 from lolo_simulation.auv import AUV, DockingStation
-from lolo_control.control_utils import twistToVel, stateToOdometry
+from lolo_control.control_ros_utils import twistToVel, stateToOdometry
 from scipy.spatial.transform import Rotation as R
 
 import cv2 as cv
 
-class Simulator:
+class ROSSimulator:
     def __init__(self, 
                  camera,
                  cameraInfo,
@@ -41,8 +41,8 @@ class Simulator:
         """
         self.auv = AUV(relativeCameraTranslation=np.array([-2.5, 0, -0.33]),
                        relativeCameraRotation=R.from_euler("XYZ", (0, -np.pi/2, -np.pi/2)).as_rotvec(),
-                       translationVector=np.array([1, 0., -2]),
-                       rotationVector=np.array([0., 0., np.pi/2.2]))
+                       translationVector=np.array([.5, 0., -2]),
+                       rotationVector=np.array([np.pi/2, 0., np.pi/2]))
         self.dockingStation = DockingStation(translationVector=np.array([0., -12., -1.8]),
                                              rotationVector=np.array([0., 0., np.pi/2]))
 
@@ -325,20 +325,25 @@ class Simulator:
 
             org = (org[0], org[1]+15)
 
-        cv.putText(controlImg, 
-                   "Vx - {}".format(round(self.dockingStation.state()[6], 2)), 
-                   org, 
-                   cv.FONT_HERSHEY_SIMPLEX, 
-                   fontScale=0.5, 
-                   thickness=1, 
-                   color=dsColor)
-        cv.putText(controlImg, 
-                   "Vx - {}".format(round(self.auv.state()[6], 2)), 
-                   (org[0]+100, org[1]), 
-                   cv.FONT_HERSHEY_SIMPLEX, 
-                   fontScale=0.5, 
-                   thickness=1, 
-                   color=auvColor)
+        auvVelState = self.auv.state()[6:]
+        dsVelState = self.dockingStation.state()[6:]
+        stateStr = ["Vx", "Vy", "Vz", "Wx", "Wy", "Wz"]
+        for auvVal, dsVal, state in zip(auvVelState, dsVelState, stateStr):
+            cv.putText(controlImg, 
+                    "{} - {}".format(state, round(dsVal, 2)), 
+                    org, 
+                    cv.FONT_HERSHEY_SIMPLEX, 
+                    fontScale=0.5, 
+                    thickness=1, 
+                    color=dsColor)
+            cv.putText(controlImg, 
+                    "{} - {}".format(state, round(auvVal, 2)), 
+                    (org[0]+100, org[1]), 
+                    cv.FONT_HERSHEY_SIMPLEX, 
+                    fontScale=0.5, 
+                    thickness=1, 
+                    color=auvColor)
+            org = (org[0], org[1]+15)
 
     def _update(self, controlCommand, i, dt):
 
@@ -438,7 +443,6 @@ class Simulator:
                 i += 1
             rate.sleep()
 
-
 if __name__ == "__main__":
     
     from lolo_perception.feature_model import FeatureModel
@@ -458,5 +462,5 @@ if __name__ == "__main__":
 
     cameraInfo = readCameraYaml(cameraYamlPath)
 
-    sim = Simulator(camera, cameraInfo, featureModel)
+    sim = ROSSimulator(camera, cameraInfo, featureModel)
     sim.run()

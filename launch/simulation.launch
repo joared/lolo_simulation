@@ -7,15 +7,13 @@
     <param name="camera_yaml" value="$(arg camera_yaml)"/>
   </node>
 
-  <include file="$(find lolo_description)/launch/lolo_description.launch" />
-
   <include file="$(find lolo_description)/launch/lolo_description.launch" >
-    <arg name="namespace" value="docking_station" />
+    <arg name="namespace" value="lolo"/>
   </include>
 
-  <!--node name="perception_node" pkg="lolo_perception" type="perception_node.py" output="screen" >
-    <param name="feature_model_yaml" value="$(arg feature_model_yaml)"/>
-  </node-->
+  <include file="$(find lolo_description)/launch/lolo_description.launch" >
+    <arg name="namespace" value="docking_station"/>
+  </include>
 
   <node name="image_proc" pkg="image_proc" type="image_proc" ns="lolo_camera">
     <remap from="image" to="/lolo_camera/image_raw"/>
