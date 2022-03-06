@@ -24,7 +24,8 @@ class ROSSimulator:
     def __init__(self, 
                  camera,
                  cameraInfo,
-                 featureModel):
+                 featureModel,
+                 velocityMode=False):
 
         self.camera = camera
         self.cameraInfo = cameraInfo
@@ -98,7 +99,7 @@ class ROSSimulator:
 
         self.resetService = rospy.Service("sim/reset", Trigger, self._resetCallback)
 
-        self.velocityMode = True # False: control mode, True: velocity mode
+        self.velocityMode = velocityMode # False: control mode, True: velocity mode
         self.auvToControl = self.dockingStation # start by manual control input to be sent to docking station 
 
     def _resetCallback(self, req):
@@ -459,8 +460,9 @@ if __name__ == "__main__":
     cameraYaml = rospy.get_param("~camera_yaml")
     cameraYamlPath = os.path.join(rospkg.RosPack().get_path("lolo_perception"), "camera_calibration_data/{}".format(cameraYaml))
     camera = Camera.fromYaml(cameraYamlPath)
-
     cameraInfo = readCameraYaml(cameraYamlPath)
 
-    sim = ROSSimulator(camera, cameraInfo, featureModel)
+    velocityMode = rospy.get_param("~velocity_mode")
+
+    sim = ROSSimulator(camera, cameraInfo, featureModel, velocityMode)
     sim.run()
