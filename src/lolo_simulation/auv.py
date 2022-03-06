@@ -1,7 +1,6 @@
 from scipy.spatial.transform import Rotation as R
 import numpy as np
 from scipy.integrate import solve_ivp
-from tf.transformations import quaternion_multiply
 
 class Submarine:
 
@@ -146,7 +145,6 @@ class Submarine:
         self.q = R.from_rotvec(self.initRotationVector).as_quat()
 
 class AUV(Submarine):
-    # https://stackoverflow.com/questions/11140163/plotting-a-3d-cube-a-sphere-and-a-vector-in-matplotlib
     def __init__(self,
                  relativeCameraTranslation=np.array([-3.0/2, 0, 0]),
                  relativeCameraRotation=R.from_euler("XYZ", (-np.pi/2, -np.pi/2, 0)).as_rotvec(), 
@@ -157,40 +155,8 @@ class AUV(Submarine):
         self.relativeCameraRotationInit = relativeCameraRotation
         self.relativeCameraTranslation = relativeCameraTranslation
         self.relativeCameraRotation = relativeCameraRotation
-        self.setCameraTransform()
-
-    def setCameraTransform(self):
-        rotMat = R.from_rotvec(self.rotationVector).as_dcm()
-        camRotMat = R.from_rotvec(self.relativeCameraRotation).as_dcm()
-        cameraTranslation = np.array(self.translationVector) + np.matmul(rotMat, self.relativeCameraTranslation)
-        cameraRotation = R.from_dcm(np.matmul(rotMat, camRotMat)).as_rotvec()
-
-    def move(self, vel, dt):
-        Submarine.move(self, vel, dt)
-        self.setCameraTransform()
-
-    def cameraYaw(self):
-        yawZero, _, _ = R.from_rotvec(self.relativeCameraRotationInit).as_euler("YXZ")
-        yawCurrent, _, _ = R.from_rotvec(self.relativeCameraRotation).as_euler("YXZ")
-        yawCurrent = yawCurrent - yawZero
-        return yawCurrent
-
-    def controlCamera(self, targetYaw, P):
-        yawZero, _, _ = R.from_rotvec(self.relativeCameraRotationInit).as_euler("YXZ")
-        targetYaw = targetYaw + yawZero
-        yawCurrent, pitch, roll = R.from_rotvec(self.relativeCameraRotation).as_euler("YXZ")
-        diff = targetYaw - yawCurrent
-        yawNew = P*diff
-        self.relativeCameraRotation = R.from_euler("YXZ", (yawNew, pitch, roll)).as_rotvec()
-
-    def controlCameraDelta(self, deltaYaw, P):
-        r = R.from_rotvec(self.relativeCameraRotation)
-        deltaR = R.from_euler("XYZ", (0, P*deltaYaw, 0))
-        newR = r*deltaR
-        self.relativeCameraRotation = newR.as_rotvec()
 
 class DockingStation(Submarine):
-    # https://stackoverflow.com/questions/11140163/plotting-a-3d-cube-a-sphere-and-a-vector-in-matplotlib
     def __init__(self,
                  relativeFeatureModelTrans=np.array([1, 0, 0]),
                  relativeFeatureModelRot=R.from_euler("XYZ", (0, -np.pi/2, -np.pi/2)).as_rotvec(), 
@@ -199,18 +165,6 @@ class DockingStation(Submarine):
         Submarine.__init__(self, *args, **kwargs)
         self.relativeFeatureModelTranslation = relativeFeatureModelTrans
         self.relativeFeatureModelRotation = relativeFeatureModelRot
-        self.setFeatureModelTransform()
-
-    def setFeatureModelTransform(self):
-        rotMat = R.from_rotvec(self.rotationVector).as_dcm()
-        featureRotMat = R.from_rotvec(self.relativeFeatureModelRotation).as_dcm()
-        featureModelTranslation = np.array(self.translationVector) + np.matmul(rotMat, self.relativeFeatureModelTranslation)
-        featureModelRotation = R.from_dcm(np.matmul(rotMat, featureRotMat)).as_rotvec()
-
-
-    def move(self, vel, dt):
-        Submarine.move(self, vel, dt)
-        self.setFeatureModelTransform()
 
 if __name__ == "__main__":
     pass

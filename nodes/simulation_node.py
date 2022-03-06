@@ -9,7 +9,7 @@ from sensor_msgs.msg import Image, CameraInfo
 from geometry_msgs.msg import PoseWithCovarianceStamped, PoseArray, TwistStamped
 from nav_msgs.msg import Odometry
 from std_msgs.msg import Float32
-from smarc_msgs.msg import ThrusterRPM
+from smarc_msgs.msg import ThrusterRPM, FloatStamped
 from std_srvs.srv import Trigger, TriggerResponse
 
 from lolo_perception.perception_utils import projectPoints
@@ -32,23 +32,13 @@ class ROSSimulator:
         
         self.featureModel = featureModel
 
-        """
-        self.auv = AUV(relativeCameraTranslation=np.array([-2.5, 0, 0.33]),
-                       relativeCameraRotation=R.from_euler("XYZ", (-np.pi/2, -np.pi/2, 0)).as_rotvec(),
-                       translationVector=np.array([4., -1., 1]),
-                       rotationVector=np.array([0., 0., 0.]))
-        self.dockingStation = DockingStation(translationVector=np.array([-4., 0., 1.5]),
-                                             rotationVector=np.array([0., 0., -0.02]))
-        """
         self.auv = AUV(relativeCameraTranslation=np.array([-2.5, 0, -0.33]),
                        relativeCameraRotation=R.from_euler("XYZ", (0, -np.pi/2, -np.pi/2)).as_rotvec(),
                        translationVector=np.array([.5, 0., -2]),
-                       rotationVector=np.array([np.pi/2, 0., np.pi/2]))
+                       rotationVector=np.array([0., 0., np.pi/2]))
+
         self.dockingStation = DockingStation(translationVector=np.array([0., -12., -1.8]),
                                              rotationVector=np.array([0., 0., np.pi/2]))
-
-        # Move the camera towards the detected lights (yaw)
-        self.controlCamera = False
 
         self.hz = 10 # publish rate
         self.dt = 1./self.hz
@@ -202,7 +192,9 @@ class ROSSimulator:
                                             self.dockingStation.relativeFeatureModelRotation, 
                                             timeStamp=timeStamp)
 
-        pArray = featurePointsToMsg(self.dockingStationFrame + "/feature_model_link", self.featureModel.features, timeStamp=timeStamp)
+        pArray = featurePointsToMsg(self.dockingStationFrame + "/feature_model_link", 
+                                    self.featureModel.features, 
+                                    timeStamp=timeStamp)
         self.featurePosesPublisher.publish(pArray)
 
         self._publishAUVOdometry(timeStamp)
@@ -216,6 +208,7 @@ class ROSSimulator:
                                                           cameraTransform]))
 
         self._publishImage(timeStamp)
+
 
     def _publishAUVOdometry(self, timeStamp):
         state = self.auv.state()
@@ -363,20 +356,6 @@ class ROSSimulator:
 
             n, deltaR, deltaE = self._controlCommandAUV
             self.auv.controlIntegrate(n, deltaR, deltaE, dt)
-        
-        if self.controlCamera:
-            #Rotating the camera towards the detected feature model
-            try:
-                trueTrans, trueRot = self.listener.lookupTransform(self.auvFrame + "_camera_link", 
-                                                                self.dockingStationFrame + "/feature_model_estimated_link", 
-                                                                rospy.Time(0))
-            except:
-                #self.auv.controlCamera(0, P=0.01)
-                return
-            
-
-            deltaYaw = np.arctan(trueTrans[0]/trueTrans[2])
-            self.auv.controlCameraDelta(deltaYaw, P=0.01)
 
     def update(self, i):
 
